@@ -2,11 +2,11 @@ from dotenv import load_dotenv
 import os
 import json
 import base64
-from requests import post, get, put
+from requests import post, get
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import FlaskSessionCacheHandler
-from flask import Flask, session, redirect, url_for, request, jsonify, render_template_string
+from flask import Flask, session, redirect, url_for, request, jsonify, render_template
 
 load_dotenv()
 client_id = os.getenv('CLIENT_ID')
@@ -50,6 +50,18 @@ def get_token():
 def get_auth_header(token):
     return {"Authorization": "Bearer " + token}
 
+def search_song_id(token, song_name):
+    url = "https://api.spotify.com/v1/search"
+    headers = get_auth_header(token)
+    query = f"?q={song_name}&type=track&limit=1"
+    query_url = url + query
+    result = get(query_url, headers=headers)
+    json_result = json.loads(result.content)
+    tracks = json_result.get("tracks", {}).get("items", [])
+    if not tracks:
+        return None
+    return tracks[0]
+
 def search_artists_id(token, artist_name):
     url = "https://api.spotify.com/v1/search"
     headers = get_auth_header(token)
@@ -70,19 +82,16 @@ def get_songs_of_artist(token, artist_id):
 
 @app.route('/')
 def login():
-    return '''
-    <h1>Login Page</h1>
-    <a href="/home">Login with Spotify</a>
-    '''
+    return render_template('login.html')
 
 @app.route('/home')
 def home():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
-    
+
     try:
         # Fetch the currently playing track
-        currently_playing = sp.currently_playing()
+        currently_playing = sp.current_playback()
         if currently_playing and currently_playing.get('is_playing'):
             playing_track = currently_playing['item']
             playing_track_name = playing_track.get('name', 'Unknown')
@@ -111,31 +120,12 @@ def home():
         top_tracks = sp.current_user_top_tracks(limit=20, offset=0, time_range='medium_term')
         tracks_info = [(track['id'], track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks['items']]
         tracks_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Track</a> <br> <img src="{image}" alt="Track Image" width="100">' for _, name, url, image in tracks_info])
-        
-        # Generate HTML
-        home_html = f'''
-        <h1>Home Page</h1>
-        <a href="/get_playlists">Get Playlists</a><br>
-        <a href="/create_playlist_form">Create Playlist</a><br>
-        <form action="/search_artist" method="post">
-            <label for="artist_name">Search for Artist:</label>
-            <input type="text" id="artist_name" name="artist_name" required>
-            <input type="submit" value="Search">
-        </form><br>
-        <a href="/logout">Logout</a>
-        <hr>
-        {currently_playing_html}
-        <h2>Your Top Artists</h2>
-        {artists_html}
-        <hr>
-        <h2>Your Top Tracks</h2>
-        {tracks_html}
-        '''
-        
+
+        return render_template('home.html', currently_playing_html=currently_playing_html, artists_html=artists_html, tracks_html=tracks_html)
+
     except Exception as e:
-        return f"Error fetching data: {str(e)}", 500
-    
-    return render_template_string(home_html)
+        print(f"Error: {e}")
+        return redirect(url_for('login'))
 
 @app.route('/callback')
 def callback():
@@ -147,127 +137,101 @@ def get_playlists():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
     
-    try:
-        playlists = sp.current_user_playlists()
-        playlists_info = [(pl['name'], pl['external_urls']['spotify']) for pl in playlists['items']]
-        playlists_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Playlist</a>' for name, url in playlists_info])
-    except Exception as e:
-        return f"Error fetching playlists: {str(e)}", 500
+    playlists = sp.current_user_playlists()
+    playlists_info = [(playlist['name'], playlist['external_urls']['spotify']) for playlist in playlists['items']]
+    playlists_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Playlist</a>' for name, url in playlists_info])
     
-    return f'''
-    <h1>Your Playlists</h1>
-    {playlists_html}
-    <br><a href="/home">Back to Home</a>
-    '''
+    return render_template('playlists.html', playlists_html=playlists_html)
 
 @app.route('/create_playlist_form')
 def create_playlist_form():
-    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
-        return redirect(sp_oauth.get_authorize_url())
-    
-    return '''
-    <h1>Create a New Playlist</h1>
-    <form action="/create_playlist" method="post">
-        <label for="name">Playlist Name:</label>
-        <input type="text" id="name" name="name" required>
-        <br>
-        <label for="description">Description:</label>
-        <input type="text" id="description" name="description">
-        <br>
-        <input type="submit" value="Create Playlist">
-    </form>
-    <br><a href="/home">Back to Home</a>
-    '''
+    return render_template('create_playlist_form.html')
 
 @app.route('/create_playlist', methods=['POST'])
 def create_playlist():
-    token_info = cache_handler.get_cached_token()
-    if not token_info:
+    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
-
-    user_id = sp.current_user()['id']
-    playlist_name = request.form.get('name')
+    
+    name = request.form.get('name')
     description = request.form.get('description', '')
-
-    if not playlist_name:
-        return jsonify({"error": "Playlist name is required"}), 400
-
-    try:
-        # Create playlist
-        playlist = sp.user_playlist_create(
-            user=user_id,
-            name=playlist_name,
-            public=True,  # Always public
-            collaborative=False,  # Always non-collaborative
-            description=description
-        )
-        
-        playlist_id = playlist['id']
-        playlist_url = playlist['external_urls']['spotify']
-
-        # Fetch top tracks
-        top_tracks = sp.current_user_top_tracks(limit=20, offset=0, time_range='medium_term')
-        track_ids = [track['id'] for track in top_tracks['items']]
-
-        # Fetch top tracks from top artists
-        top_artists = sp.current_user_top_artists(limit=5, offset=0, time_range='medium_term')
-        for artist in top_artists['items']:
-            artist_id = artist['id']
-            artist_top_tracks = sp.artist_top_tracks(artist_id, country='ID')
-            track_ids.extend([track['id'] for track in artist_top_tracks['tracks']])
-
-        # Add tracks to the newly created playlist
-        sp.user_playlist_add_tracks(user_id, playlist_id, track_ids)
-
-        return f'''
-        <h1>Playlist Created Successfully</h1>
-        <p>Your new playlist has been created and tracks have been added.</p>
-        <p>View your playlist here: <a href="{playlist_url}" target="_blank">Open Playlist</a></p>
-        <br><a href="/home">Back to Home</a>
-        '''
-    except Exception as e:
-        return f"Error creating playlist: {str(e)}", 500
-
-
-
-
+    sp.user_playlist_create(user=sp.current_user()['id'], name=name, description=description, public=True, collaborative=False)
+    
+    return redirect(url_for('home'))
 
 @app.route('/search_artist', methods=['POST'])
 def search_artist():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
-
+    
     artist_name = request.form.get('artist_name')
     token = get_token()
-    result = search_artists_id(token, artist_name)
-    if not result:
-        return "Artist not found."
-
-    artist_id = result['id']
-    artist_image = result.get('images', [{}])[0].get('url', 'No image available')
-    artist_link = result['external_urls']['spotify']
-    artist_name = result['name']
+    artist = search_artists_id(token, artist_name)
     
-    try:
-        songs = get_songs_of_artist(token, artist_id)
-        songs_html = '<br>'.join([f'{song["name"]}: <a href="{song["external_urls"]["spotify"]}" target="_blank">Open Song</a>' for song in songs])
-    except Exception as e:
-        songs_html = f"Error fetching songs: {str(e)}"
+    if not artist:
+        return "Artist not found"
+    
+    artist_id = artist['id']
+    artist_name = artist['name']
+    artist_url = artist['external_urls']['spotify']
+    artist_image = artist.get('images', [{}])[1].get('url', 'No image available')
+    top_tracks = get_songs_of_artist(token, artist_id)
+    
+    top_tracks_info = [(track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks]
+    top_tracks_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Track</a> <br> <img src="{image}" alt="Track Image" width="100">' for name, url, image in top_tracks_info])
+    
+    related_artists_info = artist.get('genres', [])
+    related_artists_html = '<br>'.join([f'Genre: {genre}' for genre in related_artists_info])
+    
+    return render_template('artist.html', artist_name=artist_name, artist_url=artist_url, artist_image=artist_image, top_tracks_html=top_tracks_html, related_artists_html=related_artists_html)
 
-    return f'''
-    <h1>Artist: {artist_name}</h1>
-    <p><a href="{artist_link}" target="_blank">Open Artist</a></p>
-    <p><img src="{artist_image}" alt="Artist Image" width="100"></p>
-    <h2>Top Songs</h2>
-    {songs_html}
-    <br><a href="/home">Back to Home</a>
-    '''
+@app.route('/search_song', methods=['POST'])
+def search_song_route():
+    token = get_token()
+    song_name = request.form.get('song_name')
+    song = search_song_id(token, song_name)
+    
+    if song is None:
+        return jsonify({"error": "Song not found"}), 404
+
+    song_name = song['name']
+    song_url = song['external_urls']['spotify']
+    song_image = song.get('album', {}).get('images', [{}])[1].get('url', 'No image available')
+    artist_name = ', '.join(artist['name'] for artist in song.get('artists', []))
+    album_name = song.get('album', {}).get('name', 'Unknown')
+
+    # Fetch related artists for the song's artists
+    try:
+        related_artists_html = ''
+        for artist in song['artists']:
+            artist_id = artist['id']
+            related_artists = sp.artist_related_artists(artist_id)['artists']
+            related_artists_html += f'<h3>Related Artists to {artist["name"]}</h3>'
+            related_artists_html += '<br>'.join([
+                f'{related_artist["name"]}: <a href="{related_artist["external_urls"]["spotify"]}" target="_blank">Open Artist</a> <br> <img src="{related_artist.get("images", [{}])[0].get("url", "No image available")}" alt="Artist Image" width="100">'
+                for related_artist in related_artists
+            ])
+    except Exception as e:
+        related_artists_html = f"Error fetching related artists: {str(e)}"
+
+    return render_template('search_song.html',
+                           song_name=song_name,
+                           artist_name=artist_name,
+                           album_name=album_name,
+                           song_url=song_url,
+                           song_image=song_image,
+                           related_artists_html=related_artists_html)
+
 
 @app.route('/logout')
 def logout():
-    session.clear()  
+    sp_oauth.revoke_token(cache_handler.get_cached_token())
+    cache_handler.clear_cache()
     return redirect(url_for('login'))
-
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+
+@app.route('/test')
+def test():
+    return render_template('test.html', message="Hello, this is a test!")
