@@ -8,6 +8,14 @@
 - **Spotify Integration**: Seamless login and playlist management through Spotify.
 - **User-Friendly Interface**: Easy-to-use interface to select mood and manage playlists.
 
+```figma
+
+
+
+```
+
+
+
 ## Team
 
 - [Leander Antony](https://github.com/Leander-Antony) 
