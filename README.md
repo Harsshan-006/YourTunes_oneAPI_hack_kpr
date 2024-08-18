@@ -18,6 +18,6 @@ https://www.figma.com/proto/TkGCbuvVCSGnmnIGGTHzUb/your-tunes?node-id=123-45&t=7
 ## Team
 
 - [Leander Antony](https://github.com/Leander-Antony) 
-- [Boopesh](https://github.com/bhoopesh1) 
+- [Bhoopesh](https://github.com/bhoopesh1) 
 - [Abishek](https://github.com/Abishek-coder01) 
 
