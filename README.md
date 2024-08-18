@@ -10,8 +10,7 @@
 
 ```figma
 
-https://www.figma.com/design/TkGCbuvVCSGnmnIGGTHzUb/your-tunes?m=auto&t=DVY0PwEqv1FmNcM8-6
-
+https://www.figma.com/proto/TkGCbuvVCSGnmnIGGTHzUb/your-tunes?node-id=123-45&t=7fSnlgfd32b9XZl1-1&scaling=contain&content-scaling=fixed&page-id=103%3A40&starting-point-node-id=123%3A45
 ```
 
 
