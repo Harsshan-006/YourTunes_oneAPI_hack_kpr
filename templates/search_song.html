@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Song Search Result</title>
+</head>
+<body>
+    <h1>Song Found</h1>
+    <p><strong>Song Name:</strong> {{ song_name }}</p>
+    <p><strong>Artist(s):</strong> {{ artist_name }}</p>
+    <p><strong>Album:</strong> {{ album_name }}</p>
+    <p><strong>Song Link:</strong> <a href="{{ song_url }}" target="_blank">Open Song</a></p>
+    <p><strong>Song Image:</strong> <img src="{{ song_image }}" alt="Song Image" width="100"></p>
+    <hr>
+    {% if related_artists_html %}
+        <h2>Related Artists</h2>
+        {{ related_artists_html|safe }}
+    {% endif %}
+    <br><a href="{{ url_for('home') }}">Back to Home</a>
+</body>
+</html>
