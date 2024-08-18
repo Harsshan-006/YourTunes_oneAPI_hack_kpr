@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Home Page</title>
+</head>
+<body>
+    <h1>Home Page</h1>
+    <a href="/get_playlists">Get Playlists</a><br>
+    <a href="/create_playlist_form">Create Playlist</a><br>
+    <form action="/search_artist" method="post">
+        <label for="artist_name">Search for Artist:</label>
+        <input type="text" id="artist_name" name="artist_name" required>
+        <input type="submit" value="Search">
+    </form><br>
+    <form action="/search_song" method="post">
+        <label for="song_name">Search for Song:</label>
+        <input type="text" id="song_name" name="song_name" required>
+        <input type="submit" value="Search">
+    </form>
+    
+    <a href="/logout">Logout</a>
+    <hr>
+    {{ currently_playing_html|safe }}
+    <h2>Your Top Artists</h2>
+    {{ artists_html|safe }}
+    <hr>
+    <h2>Your Top Tracks</h2>
+    {{ tracks_html|safe }}
+</body>
+</html>
