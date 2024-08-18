@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import os
 import json
 import base64
-from requests import post, get
+from requests import post, get, put
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import FlaskSessionCacheHandler
@@ -80,17 +80,64 @@ def home():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
     
-    return '''
-    <h1>Home Page</h1>
-    <a href="/get_playlists">Get Playlists</a><br>
-    <a href="/create_playlist_form">Create Playlist</a><br>
-    <form action="/search_artist" method="post">
-        <label for="artist_name">Search for Artist:</label>
-        <input type="text" id="artist_name" name="artist_name" required>
-        <input type="submit" value="Search">
-    </form><br>
-    <a href="/logout">Logout</a>
-    '''
+    try:
+        # Fetch the currently playing track
+        currently_playing = sp.currently_playing()
+        if currently_playing and currently_playing.get('is_playing'):
+            playing_track = currently_playing['item']
+            playing_track_name = playing_track.get('name', 'Unknown')
+            playing_artist_name = ', '.join(artist['name'] for artist in playing_track.get('artists', []))
+            playing_album_name = playing_track.get('album', {}).get('name', 'Unknown')
+            playing_track_url = playing_track.get('external_urls', {}).get('spotify', '#')
+            playing_track_image = playing_track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')
+            currently_playing_html = f'''
+            <h2>Currently Playing</h2>
+            <p>Track Name: {playing_track_name}</p>
+            <p>Artist: {playing_artist_name}</p>
+            <p>Album: {playing_album_name}</p>
+            <p>Track Link: <a href="{playing_track_url}" target="_blank">Open Track</a></p>
+            <p>Track Image: <img src="{playing_track_image}" alt="Track Image" width="100"></p>
+            <hr>
+            '''
+        else:
+            currently_playing_html = '<h2>Currently Playing</h2><p>No track is currently playing.</p><hr>'
+
+        # Fetch user's top artists
+        top_artists = sp.current_user_top_artists(limit=20, offset=0, time_range='medium_term')
+        artists_info = [(artist['name'], artist['external_urls']['spotify'], artist.get('images', [{}])[0].get('url', 'No image available')) for artist in top_artists['items']]
+        artists_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Artist</a> <br> <img src="{image}" alt="Artist Image" width="100">' for name, url, image in artists_info])
+        
+        # Fetch user's top tracks
+        top_tracks = sp.current_user_top_tracks(limit=20, offset=0, time_range='medium_term')
+        tracks_info = [(track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks['items']]
+        tracks_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Track</a> <br> <img src="{image}" alt="Track Image" width="100">' for name, url, image in tracks_info])
+        
+        # Generate HTML
+        home_html = f'''
+        <h1>Home Page</h1>
+        <a href="/get_playlists">Get Playlists</a><br>
+        <a href="/create_playlist_form">Create Playlist</a><br>
+        <form action="/search_artist" method="post">
+            <label for="artist_name">Search for Artist:</label>
+            <input type="text" id="artist_name" name="artist_name" required>
+            <input type="submit" value="Search">
+        </form><br>
+        <a href="/logout">Logout</a>
+        <hr>
+        {currently_playing_html}
+        <h2>Your Top Artists</h2>
+        {artists_html}
+        <hr>
+        <h2>Your Top Tracks</h2>
+        {tracks_html}
+        '''
+        
+    except Exception as e:
+        return f"Error fetching data: {str(e)}", 500
+    
+    return render_template_string(home_html)
+
+
 
 @app.route('/callback')
 def callback():
