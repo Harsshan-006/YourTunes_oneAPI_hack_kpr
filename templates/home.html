@@ -5,6 +5,11 @@
 </head>
 <body>
     <h1>Home Page</h1>
+    
+    <!-- User Profile Section -->
+    <h2>Welcome, <a href="{{ user_profile_url }}" target="_blank">{{ user_display_name }}</a></h2>
+    <img src="{{ user_profile_image }}" alt="Profile Image" width="64" style="border-radius: 50%;">
+    
     <form action="/create_playlist" method="post">
         <label for="mood">How do you feel today?</label>
         <input type="text" id="mood" name="mood" required>

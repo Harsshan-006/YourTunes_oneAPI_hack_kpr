@@ -124,6 +124,12 @@ def home():
         else:
             currently_playing_html = '<h2>Currently Playing</h2><p>No track is currently playing.</p><hr>'
 
+        # Fetch user's profile
+        user_profile = sp.current_user()
+        user_display_name = user_profile['display_name']
+        user_profile_url = user_profile['external_urls']['spotify']
+        user_profile_image = user_profile['images'][0]['url']  # Use the smaller image
+
         # Fetch user's top artists
         top_artists = sp.current_user_top_artists(limit=5, offset=0, time_range='medium_term')
         artists_info = [(artist['id'], artist['name'], artist['external_urls']['spotify'], artist.get('images', [{}])[0].get('url', 'No image available')) for artist in top_artists['items']]
@@ -134,7 +140,7 @@ def home():
         tracks_info = [(track['id'], track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks['items']]
         tracks_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Track</a> <br> <img src="{image}" alt="Track Image" width="100">' for _, name, url, image in tracks_info])
 
-        return render_template('home.html', currently_playing_html=currently_playing_html, artists_html=artists_html, tracks_html=tracks_html)
+        return render_template('home.html', currently_playing_html=currently_playing_html, artists_html=artists_html, tracks_html=tracks_html, user_display_name=user_display_name, user_profile_url=user_profile_url, user_profile_image=user_profile_image)
 
     except Exception as e:
         print(f"Error: {e}")
@@ -180,6 +186,8 @@ def extract_songs(text):
     lines = text.split('\n')
     songs = [line.strip() for line in lines if line.strip()]
     return songs
+
+
 
 def playlist_generator(mood, prferred_language):
     pipeline = generator.Generate(
@@ -267,11 +275,16 @@ def create_playlist_from_input():
         
         if track_ids:
             sp.playlist_add_items(playlist_id, track_ids)
+        
+        # Get the cover image
+        playlist_cover_image = sp.playlist_cover_image(playlist_id)
+        cover_image_url = playlist_cover_image[0]['url'] if playlist_cover_image else 'No image available'
 
-        return redirect(url_for('your_tunes', playlist_id=playlist_id, playlist_url=playlist_url))
+        return redirect(url_for('your_tunes', playlist_id=playlist_id, playlist_url=playlist_url, cover_image_url=cover_image_url))
     except Exception as e:
         print(f"Error creating playlist: {e}")
         return "Error creating playlist. Please try again.", 500
+
 
 
 
@@ -280,11 +293,15 @@ def create_playlist_from_input():
 def your_tunes():
     playlist_id = request.args.get('playlist_id')
     playlist_url = request.args.get('playlist_url')
+    cover_image_url = request.args.get('cover_image_url')
 
     if not playlist_id or not playlist_url:
         return "No playlist information available.", 400
 
-    return render_template('yourtunes.html', playlist_id=playlist_id, playlist_url=playlist_url)
+    return render_template('yourtunes.html', playlist_id=playlist_id, playlist_url=playlist_url, cover_image_url=cover_image_url)
+
+
+
 
 
 @app.route('/logout')
