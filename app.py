@@ -7,10 +7,23 @@ from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import FlaskSessionCacheHandler
 from flask import Flask, session, redirect, url_for, request, jsonify, render_template
+from beyondllm import retrieve, generator, source
+import os
+from dotenv import load_dotenv
+import re
+
+from beyondllm.embeddings import GeminiEmbeddings
+from beyondllm.llms import GeminiModel
 
 load_dotenv()
 client_id = os.getenv('CLIENT_ID')
 client_secret = os.getenv('CLIENT_SECRET')
+google_api = os.getenv('GOOGLE_API_KEY')
+
+embed_model = GeminiEmbeddings(model_name="models/embedding-001")
+llm = GeminiModel(model_name="gemini-pro")
+data = source.fit(path="data/text.txt", dtype="pdf", chunk_size=512, chunk_overlap=0)
+retriever = retrieve.auto_retriever(data=data, embed_model=embed_model, type="normal", top_k=4)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(64)
@@ -115,7 +128,7 @@ def home():
         top_artists = sp.current_user_top_artists(limit=20, offset=0, time_range='medium_term')
         artists_info = [(artist['id'], artist['name'], artist['external_urls']['spotify'], artist.get('images', [{}])[0].get('url', 'No image available')) for artist in top_artists['items']]
         artists_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Artist</a> <br> <img src="{image}" alt="Artist Image" width="100">' for _, name, url, image in artists_info])
-        
+
         # Fetch user's top tracks
         top_tracks = sp.current_user_top_tracks(limit=20, offset=0, time_range='medium_term')
         tracks_info = [(track['id'], track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks['items']]
@@ -136,98 +149,137 @@ def callback():
 def get_playlists():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
-    
+
     playlists = sp.current_user_playlists()
     playlists_info = [(playlist['name'], playlist['external_urls']['spotify']) for playlist in playlists['items']]
     playlists_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Playlist</a>' for name, url in playlists_info])
-    
+
     return render_template('playlists.html', playlists_html=playlists_html)
 
-@app.route('/create_playlist_form')
-def create_playlist_form():
-    return render_template('create_playlist_form.html')
+
+def safe_call(pipeline):
+    try:
+        return pipeline.call()
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+def mood_analyse(input):
+    pipeline = generator.Generate(
+        question=input,
+        system_prompt="You are a mood analyzer based on the user's input, respond with one word indicating their mood.",
+        retriever=retriever,
+        llm=llm
+    )
+    response = safe_call(pipeline)
+    print(response)
+    return response
+
+def extract_songs(text):
+    # Assuming each song is on a new line
+    lines = text.split('\n')
+    songs = [line.strip() for line in lines if line.strip()]
+    return songs
+
+def playlist_generator(mood, prferred_language):
+    pipeline = generator.Generate(
+        question=mood,
+        system_prompt=f"You are a playlist generator based on the user's mood. Provide 50 songs to comfort the user in {prferred_language}. I need the output in a simple list format, one song per line.",
+        retriever=retriever,
+        llm=llm
+    )
+    response = safe_call(pipeline)
+    if response:
+        songs = extract_songs(response)
+        print(songs)
+        return songs
+    
+    return []
+
+def playlist_name_generator(songs, mood):
+    """Generate a name for the playlist based on songs and mood."""
+    song_list_str = '\n'.join(songs)  # Convert list to a single string
+    pipeline = generator.Generate(
+        question=song_list_str,
+        system_prompt=f"Based on the user input and {mood}, generate a name for the playlist that resonates with the mood.",
+        retriever=retriever,
+        llm=llm
+    )
+    response = safe_call(pipeline)
+    print(response)
+    return response
+
+def playlist_description_generator(mood):
+    """Generate a description for the playlist."""
+    pipeline = generator.Generate(
+        question=f"i need description for my playlist based on {mood}",
+        system_prompt=f"Generate a brief description for the a playlist .",
+        retriever=retriever,
+        llm=llm
+    )
+    response = safe_call(pipeline)
+    print(response)
+    return response
+
 
 @app.route('/create_playlist', methods=['POST'])
-def create_playlist():
+def create_playlist_from_input():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         return redirect(sp_oauth.get_authorize_url())
-    
-    name = request.form.get('name')
-    description = request.form.get('description', '')
-    sp.user_playlist_create(user=sp.current_user()['id'], name=name, description=description, public=True, collaborative=False)
-    
-    return redirect(url_for('home'))
 
-@app.route('/search_artist', methods=['POST'])
-def search_artist():
-    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
-        return redirect(sp_oauth.get_authorize_url())
-    
-    artist_name = request.form.get('artist_name')
-    token = get_token()
-    artist = search_artists_id(token, artist_name)
-    
-    if not artist:
-        return "Artist not found"
-    
-    artist_id = artist['id']
-    artist_name = artist['name']
-    artist_url = artist['external_urls']['spotify']
-    artist_image = artist.get('images', [{}])[1].get('url', 'No image available')
-    top_tracks = get_songs_of_artist(token, artist_id)
-    
-    top_tracks_info = [(track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks]
-    top_tracks_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Track</a> <br> <img src="{image}" alt="Track Image" width="100">' for name, url, image in top_tracks_info])
-    
-    related_artists_info = artist.get('genres', [])
-    related_artists_html = '<br>'.join([f'Genre: {genre}' for genre in related_artists_info])
-    
-    return render_template('artist.html', artist_name=artist_name, artist_url=artist_url, artist_image=artist_image, top_tracks_html=top_tracks_html, related_artists_html=related_artists_html)
+    input = request.form.get('mood')
+    preferred_language = request.form.get('language')
 
-@app.route('/search_song', methods=['POST'])
-def search_song_route():
-    token = get_token()
-    song_name = request.form.get('song_name')
-    song = search_song_id(token, song_name)
-    
-    if song is None:
-        return jsonify({"error": "Song not found"}), 404
+    if not input or not preferred_language:
+        return "Mood or language not provided.", 400
 
-    song_name = song['name']
-    song_url = song['external_urls']['spotify']
-    song_image = song.get('album', {}).get('images', [{}])[1].get('url', 'No image available')
-    artist_name = ', '.join(artist['name'] for artist in song.get('artists', []))
-    album_name = song.get('album', {}).get('name', 'Unknown')
+    mood = mood_analyse(input)
+    if not mood:
+        return "Error analyzing mood.", 500
 
-    # Fetch related artists for the song's artists
+    songs = playlist_generator(mood, preferred_language)
+    if not songs:
+        return "No songs generated for the playlist.", 500
+
+    name = playlist_name_generator(songs, mood)
+    if not name:
+        return "Error generating playlist name.", 500
+
+    description = playlist_description_generator(mood)
+    if not description:
+        description = "A playlist created based on your mood."
+
     try:
-        related_artists_html = ''
-        for artist in song['artists']:
-            artist_id = artist['id']
-            related_artists = sp.artist_related_artists(artist_id)['artists']
-            related_artists_html += f'<h3>Related Artists to {artist["name"]}</h3>'
-            related_artists_html += '<br>'.join([
-                f'{related_artist["name"]}: <a href="{related_artist["external_urls"]["spotify"]}" target="_blank">Open Artist</a> <br> <img src="{related_artist.get("images", [{}])[0].get("url", "No image available")}" alt="Artist Image" width="100">'
-                for related_artist in related_artists
-            ])
+        playlist = sp.user_playlist_create(user=sp.current_user()['id'], name=name, description=description, public=True, collaborative=False)
+        playlist_id = playlist['id']
+        playlist_url = playlist['external_urls']['spotify']
+        return redirect(url_for('your_tunes', playlist_id=playlist_id, playlist_url=playlist_url))
     except Exception as e:
-        related_artists_html = f"Error fetching related artists: {str(e)}"
+        print(f"Error creating playlist: {e}")
+        return "Error creating playlist. Please try again.", 500
 
-    return render_template('search_song.html',
-                           song_name=song_name,
-                           artist_name=artist_name,
-                           album_name=album_name,
-                           song_url=song_url,
-                           song_image=song_image,
-                           related_artists_html=related_artists_html)
+
+
+@app.route('/yourtunes')
+def your_tunes():
+    playlist_id = request.args.get('playlist_id')
+    playlist_url = request.args.get('playlist_url')
+
+    if not playlist_id or not playlist_url:
+        return "No playlist information available.", 400
+
+    return render_template('yourtunes.html', playlist_id=playlist_id, playlist_url=playlist_url)
 
 
 @app.route('/logout')
 def logout():
-    sp_oauth.revoke_token(cache_handler.get_cached_token())
+    # Clear the cached token
     cache_handler.clear_cache()
+    # Clear session data
+    session.clear()
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
