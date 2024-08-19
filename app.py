@@ -125,12 +125,12 @@ def home():
             currently_playing_html = '<h2>Currently Playing</h2><p>No track is currently playing.</p><hr>'
 
         # Fetch user's top artists
-        top_artists = sp.current_user_top_artists(limit=20, offset=0, time_range='medium_term')
+        top_artists = sp.current_user_top_artists(limit=5, offset=0, time_range='medium_term')
         artists_info = [(artist['id'], artist['name'], artist['external_urls']['spotify'], artist.get('images', [{}])[0].get('url', 'No image available')) for artist in top_artists['items']]
         artists_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Artist</a> <br> <img src="{image}" alt="Artist Image" width="100">' for _, name, url, image in artists_info])
 
         # Fetch user's top tracks
-        top_tracks = sp.current_user_top_tracks(limit=20, offset=0, time_range='medium_term')
+        top_tracks = sp.current_user_top_tracks(limit=5, offset=0, time_range='medium_term')
         tracks_info = [(track['id'], track['name'], track['external_urls']['spotify'], track.get('album', {}).get('images', [{}])[1].get('url', 'No image available')) for track in top_tracks['items']]
         tracks_html = '<br>'.join([f'{name}: <a href="{url}" target="_blank">Open Track</a> <br> <img src="{image}" alt="Track Image" width="100">' for _, name, url, image in tracks_info])
 
@@ -209,10 +209,10 @@ def playlist_name_generator(songs, mood):
     print(response)
     return response
 
-def playlist_description_generator(mood):
+def playlist_description_generator(mood, name):
     """Generate a description for the playlist."""
     pipeline = generator.Generate(
-        question=f"i need description for my playlist based on {mood}",
+        question=f"i need description for my playlist based on {mood} and {name}",
         system_prompt=f"Generate a brief description for the a playlist .",
         retriever=retriever,
         llm=llm
@@ -245,18 +245,34 @@ def create_playlist_from_input():
     if not name:
         return "Error generating playlist name.", 500
 
-    description = playlist_description_generator(mood)
+    description = playlist_description_generator(mood, name)
     if not description:
         description = "A playlist created based on your mood."
 
     try:
+        # Create the playlist
         playlist = sp.user_playlist_create(user=sp.current_user()['id'], name=name, description=description, public=True, collaborative=False)
         playlist_id = playlist['id']
         playlist_url = playlist['external_urls']['spotify']
+
+        # Get the access token
+        token = get_token()
+        
+        # Search for song IDs and add them to the playlist
+        track_ids = []
+        for song in songs:
+            song_info = search_song_id(token, song)
+            if song_info:
+                track_ids.append(song_info['uri'])
+        
+        if track_ids:
+            sp.playlist_add_items(playlist_id, track_ids)
+
         return redirect(url_for('your_tunes', playlist_id=playlist_id, playlist_url=playlist_url))
     except Exception as e:
         print(f"Error creating playlist: {e}")
         return "Error creating playlist. Please try again.", 500
+
 
 
 
@@ -273,13 +289,10 @@ def your_tunes():
 
 @app.route('/logout')
 def logout():
-    # Clear the cached token
-    cache_handler.clear_cache()
-    # Clear session data
+    session.pop('token_info', None)
     session.clear()
     return redirect(url_for('login'))
 
+
 if __name__ == '__main__':
     app.run(debug=True)
-
-
